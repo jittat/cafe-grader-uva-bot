@@ -1,0 +1,205 @@
+#!/usr/bin/env ruby
+
+UVA_PROBLEM_ID = 100
+
+require 'fileutils'
+
+require 'yaml'
+
+require 'mechanize'
+require 'nokogiri'
+
+class UVaBot
+  UVA_URL = 'https://uva.onlinejudge.org/'
+  SUBMIT_URL = 'https://uva.onlinejudge.org/index.php?option=com_onlinejudge&Itemid=25'
+  COOKIE_HOST = 'uva.onlinejudge.org'
+  
+  def initialize(username, password)
+    @username = username
+    @password = password
+    @agent = Mechanize.new
+  end
+
+  def login
+    html = @agent.get(UVA_URL)
+
+    form = html.forms[0]
+    
+    form.username = @username
+    form.passwd = @password
+    loggedin_html = @agent.submit(form)
+
+    return loggedin_html.search('#mod_loginform').length == 0
+  end
+
+  def submit(problem_id, language_id, filename)
+    submit_page = @agent.get(SUBMIT_URL)
+    form = submit_page.forms[1]
+    form.localid = problem_id
+    form.radiobuttons_with(:name => 'language')[language_id - 1].check
+    form.file_uploads.first.file_name = filename
+    submit_page = @agent.submit(form,form.buttons.first)
+
+    message = submit_page.search('.message')
+    if message.length == 1
+      submission_id = message[0].text.split.last.to_i
+      return submission_id
+    else
+      return nil
+    end
+  end
+end
+
+def log(str='')
+  if ENV['TALKATIVE']!=nil
+    puts str
+  end
+  if ENV['GRADER_LOGGING']!=nil
+    log_fname = ENV['GRADER_LOGGING']
+    fp = File.open(log_fname,"a")
+    fp.puts("judge: #{Time.new.strftime("%H:%M")} #{str}")
+    fp.close
+  end
+end
+
+problem_home = ENV['PROBLEM_HOME']
+
+def execute(command, error_message="")
+  if not system(command)
+    msg = "ERROR: #{error_message}"
+    log msg
+    raise(msg)
+  end
+end
+
+def call_and_log(error_message)
+  begin
+    yield
+  rescue
+    msg = "ERROR: #{error_message}"
+    log msg
+    raise msg
+  end
+end
+
+def clear_and_create_empty_dir(dir)
+  FileUtils.rm_rf(dir, :secure => true)
+  call_and_log("Cannot make directory #{dir}.") { FileUtils.mkdir(dir) }
+end
+
+# ARGV[0] --- language
+# ARGV[1] --- program source file
+# ARGV[2] --- test result directory
+# ARGV[3] --- sandbox directory
+
+if ARGV.length < 2 || ARGV.length > 4
+  puts "Usage: judge <language> <program-source> [<test-result-directory>] [<sandbox-directory>]"
+  puts "  <sandbox-directory> is defaulted to ./sandbox"
+  puts "  <test-result-directory> is defaulted to ./test-result"
+  puts "WARNING: The judge script will forcefully create the (implicitly and explicitly) specified directories and remove anything inside it."
+  exit(127)
+end
+
+language = ARGV[0]
+if language != "c" && language != "c++" && language != "pas" && language != "java" && language != "ruby" && language != "python" && language != "php"
+  log "You specified a language that is not supported: #{language}."
+  exit(127)
+end
+
+source_file = ARGV[1]
+ENV['SOURCE_NAME'] = source_file
+if File.exist?(source_file) == false
+  log "The source file does not exist."
+  exit(127)
+end
+
+log "Making test result and sandbox directories..."
+
+current_dir = FileUtils.pwd
+current_dir.strip!
+
+if ARGV.length >= 3
+  test_result_dir = ARGV[2]
+else
+  test_result_dir = "#{current_dir}/test-result"
+end
+
+log "Test result directory: #{test_result_dir}"
+clear_and_create_empty_dir(test_result_dir)
+
+if ARGV.length >= 4
+  sandbox_dir = ARGV[3]
+else
+  sandbox_dir = "#{current_dir}/sandbox"
+end
+log "Sandbox directory: #{sandbox_dir}"
+clear_and_create_empty_dir(sandbox_dir)
+
+# Compile
+log
+log "Compiling..."
+call_and_log("Cannot copy the source file to #{sandbox_dir}") { 
+  FileUtils.cp(source_file, sandbox_dir) 
+}
+begin 
+  Dir.chdir sandbox_dir
+rescue
+  log "ERROR: Cannot change directory to #{sandbox_dir}."
+  exit(127)
+end
+execute("#{problem_home}/script/compile #{language} #{source_file}", "Compilation error!")
+compile_message = open("compiler_message").read
+compile_message.strip!
+call_and_log("Cannot move the compiler message to #{test_result_dir}.") {
+  FileUtils.mv("compiler_message", test_result_dir)
+}
+if !FileTest.exist?("a.out")
+  log "Cannot compile the source code. See message in #{test_result_dir}/compile_message"
+  exit(127)
+else
+  call_and_log("Cannot move the compiled program to #{test_result_dir}") {
+    FileUtils.mv("a.out",test_result_dir)
+    if language == "java" then Dir["*.class"].each { |file| FileUtils.mv(file,test_result_dir)} end
+    if language == "python" then Dir["*.pyc"].each { |file| FileUtils.mv(file,test_result_dir)} end
+  }
+  FileUtils.rm_rf("#{sandbox_dir}/.")
+end
+
+uva_config = YAML.load(File.open("#{problem_home}/../../uva.yml").read)
+uva_username = uva_config['username']
+uva_password = uva_config['password']
+
+bot = UVaBot.new(uva_username, uva_password)
+if !bot.login
+  log "UVa bot user/password error"
+  exit(127)
+end
+
+LANG_MAP = {'c' => 1,
+            'java' => 2,
+            'c++' => 5,
+            'pascal' => 4,
+            'python' => 6}
+
+language_id = LANG_MAP[language]
+
+submission_id = bot.submit(UVA_PROBLEM_ID, language_id, "#{current_dir}/#{source_file}")
+log "Submitted as #{submission_id}"
+
+# Grade
+log
+log "Grading..."
+begin
+  Dir.chdir test_result_dir
+rescue
+  log "ERROR: Cannot change directory to #{test_result_dir}."
+  exit(127)
+end
+
+result_file = File.new("result", "w")
+result_file.write "0\n"
+result_file.close
+
+comment_file = File.new("comment", "w")
+comment_file.write "uva-submitted:#{submission_id}\n"
+comment_file.close
