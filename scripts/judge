@@ -1,9 +1,7 @@
 #!/usr/bin/env ruby
 
-UVA_PROBLEM_ID = 100
-
 require 'fileutils'
-
+require 'pathname'
 require 'yaml'
 
 require 'mechanize'
@@ -63,6 +61,10 @@ def log(str='')
 end
 
 problem_home = ENV['PROBLEM_HOME']
+
+pn = Pathname.new(problem_home)
+problem_name = pn.basename
+uva_problem_id = (problem_name.to_s.split('_'))[0].slice(3,100)
 
 def execute(command, error_message="")
   if not system(command)
@@ -183,7 +185,7 @@ LANG_MAP = {'c' => 1,
 
 language_id = LANG_MAP[language]
 
-submission_id = bot.submit(UVA_PROBLEM_ID, language_id, "#{current_dir}/#{source_file}")
+submission_id = bot.submit(uva_problem_id, language_id, "#{current_dir}/#{source_file}")
 log "Submitted as #{submission_id}"
 
 # Grade
