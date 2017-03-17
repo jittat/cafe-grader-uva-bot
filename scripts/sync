@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+
+require 'yaml'
+require 'net/http'
+
+def get_online_judge_id
+  uva_config = YAML.load(File.open(File.dirname(__FILE__) + "/../uva.yml").read)
+  online_judge_id = uva_config['online_judge_id']
+  return online_judge_id
+end
+
+def extract_uva_submission_id(comment)
+  comment.split(':')[1].to_i
+end
+
+GRADER_ENV = 'grading'
+require File.join(File.dirname(__FILE__),'config/environment')
+RAILS_ENV = 'development'
+require RAILS_ROOT + '/config/environment'
+
+online_judge_id = get_online_judge_id
+
+submissions = {}
+
+Submission.where("grader_comment LIKE ?","uva-submitted:%").each do |sub|
+  sub_id = extract_uva_submission_id(sub.grader_comment)
+  submissions[sub_id] = sub
+end
+
+if submissions.length == 0
+  exit
+end
+
+uhunt_uri = URI("http://uhunt.felix-halim.net/api/subs-user/#{online_judge_id}")
+results_json_str = Net::HTTP.get(uhunt_uri)
+submission_results = JSON.parse(results_json_str)['subs']
+
+VERDICT_MSG = {
+  10 => 'Submission error',
+  15 => 'Can\'t be judged',
+  20 => 'In queue',
+  30 => 'Compile error',
+  35 => 'Restricted function',
+  40 => 'Runtime error',
+  45 => 'Output limit',
+  50 => 'Time limit',
+  60 => 'Memory limit',
+  70 => 'Wrong answer',
+  80 => 'PresentationE',
+  90 => 'Accepted'
+}
+
+submission_results.each do |result|
+  sub_id = result[0]
+  prob_id = result[1]
+  verdict_id = result[2]
+  if submissions.has_key? sub_id
+    submission = submissions[sub_id]
+    if verdict_id != 20
+      if verdict_id == 90
+        submission.points = 10
+      else
+        submission.points = 0
+      end
+      msg = VERDICT_MSG[verdict_id]
+      submission.grader_comment = "uva-graded(#{msg}):#{sub_id}"
+      submission.save
+    end
+  end
+end
+
+
