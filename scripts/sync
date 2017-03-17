@@ -58,11 +58,15 @@ submission_results.each do |result|
     submission = submissions[sub_id]
     if verdict_id != 20
       if verdict_id == 90
-        submission.points = 10
+        submission.points = submission.problem.full_score
       else
         submission.points = 0
       end
-      msg = VERDICT_MSG[verdict_id]
+      if VERDICT_MSG.has_key? verdict_id
+        msg = VERDICT_MSG[verdict_id]
+      else
+        msg = "#{verdict_id}"
+      end
       submission.grader_comment = "uva-graded(#{msg}):#{sub_id}"
       submission.save
     end
