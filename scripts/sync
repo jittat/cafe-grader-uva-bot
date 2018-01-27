@@ -31,7 +31,7 @@ if submissions.length == 0
   exit
 end
 
-uhunt_uri = URI("http://uhunt.felix-halim.net/api/subs-user-last/#{online_judge_id}/500")
+uhunt_uri = URI("http://uhunt.onlinejudge.org/api/subs-user-last/#{online_judge_id}/500")
 results_json_str = Net::HTTP.get(uhunt_uri)
 submission_results = JSON.parse(results_json_str)['subs']
 
