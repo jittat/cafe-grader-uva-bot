@@ -31,7 +31,7 @@ if submissions.length == 0
   exit
 end
 
-uhunt_uri = URI("http://uhunt.felix-halim.net/api/subs-user-last/#{online_judge_id}/500")
+uhunt_uri = URI("https://uhunt.onlinejudge.org/api/subs-user-last/#{online_judge_id}/500")
 results_json_str = Net::HTTP.get(uhunt_uri)
 submission_results = JSON.parse(results_json_str)['subs']
 
@@ -56,7 +56,7 @@ submission_results.each do |result|
   verdict_id = result[2]
   if submissions.has_key? sub_id
     submission = submissions[sub_id]
-    if verdict_id != 20
+    if (verdict_id != 20) and (verdict_id != 0)
       if verdict_id == 90
         submission.points = submission.problem.full_score
       else
